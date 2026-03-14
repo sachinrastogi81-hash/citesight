@@ -1,0 +1,10 @@
+{
+  "name": "@citesight/worker-runtime",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "python3 -m src.main",
+    "start": "python3 -m src.main",
+    "test": "python3 -m unittest discover -s tests -p 'test_*.py'"
+  }
+}

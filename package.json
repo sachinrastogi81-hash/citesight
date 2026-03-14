@@ -1,0 +1,29 @@
+{
+  "name": "citesight",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*",
+    "workers"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev": "npm run dev --workspaces --if-present",
+    "dev:local": "concurrently -k -n api,web \"npm run dev:local:api\" \"npm run dev:local:web\"",
+    "dev:local:alt": "concurrently -k -n api,web \"CORS_ORIGIN=http://localhost:3002 PORT=4002 npm run dev -w apps/api\" \"PORT=3002 NEXT_PUBLIC_API_BASE_URL=http://localhost:4002/api npm run dev -w apps/web\"",
+    "dev:local:api": "npm run dev -w apps/api",
+    "dev:local:web": "npm run dev -w apps/web",
+    "local:setup": "cp -n apps/api/.env.example apps/api/.env || true && cp -n apps/web/.env.example apps/web/.env || true && npm run prisma:migrate -w apps/api && npm run prisma:generate -w apps/api",
+    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "docker:smoke": "docker build -f apps/web/Dockerfile . && docker build -f apps/api/Dockerfile . && docker build -f workers/Dockerfile ."
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

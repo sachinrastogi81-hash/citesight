@@ -1,0 +1,783 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrgRole {
+  ADMIN
+  EDITOR
+  VIEWER
+}
+
+enum AiEngine {
+  CHATGPT
+  PERPLEXITY
+  GEMINI
+  GOOGLE_AIO
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  FAILED
+  COMPLETED
+  DEAD_LETTER
+}
+
+enum ResearchPromptType {
+  CATEGORY_RELATED
+  COMPARISON
+  HOW_TO
+  PROBLEM_SOLVING
+  INFORMATIONAL
+  TRANSACTIONAL
+}
+
+model User {
+  id            String                @id @default(uuid())
+  email         String                @unique
+  name          String
+  passwordHash  String?               @map("password_hash")
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
+  memberships   WorkspaceMembership[]
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model Workspace {
+  id                 String                @id @default(uuid())
+  name               String
+  slug               String                @unique
+  onboardingComplete Boolean               @default(false) @map("onboarding_complete")
+  createdAt          DateTime              @default(now()) @map("created_at")
+  updatedAt          DateTime              @updatedAt @map("updated_at")
+  memberships        WorkspaceMembership[]
+  apiKeys            ApiKey[]
+  brands             Brand[]
+  integrations       Integration[]
+  brandProfile       BrandProfile?
+  brandVoice         BrandVoice?
+  brandProducts      BrandProduct[]
+  brandAudience      BrandAudience?
+  brandCompetitors   BrandCompetitor[]
+  workflowTemplates  WorkflowTemplate[]
+  grids              Grid[]
+
+  @@map("workspaces")
+}
+
+model WorkspaceMembership {
+  userId      String   @map("user_id")
+  workspaceId String   @map("workspace_id")
+  role        OrgRole  @default(VIEWER)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([userId, workspaceId])
+  @@index([workspaceId])
+  @@map("workspace_memberships")
+}
+
+model ApiKey {
+  id          String    @id @default(uuid())
+  workspaceId String    @map("workspace_id")
+  keyHash     String    @map("key_hash")
+  keyPreview  String    @map("key_preview")
+  label       String
+  lastUsed    DateTime? @map("last_used")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("api_keys")
+}
+
+model Brand {
+  id          String   @id @default(uuid())
+  workspaceId String   @unique @map("workspace_id")
+  name        String
+  domain      String?
+  description String?
+  category    String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("brands")
+}
+
+model Competitor {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  domain      String
+  brandName   String?  @map("brand_name")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId])
+  @@map("competitors")
+}
+
+model Topic {
+  id          String     @id @default(uuid())
+  workspaceId String     @map("workspace_id")
+  topicName   String     @map("topic_name")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  queries     AeoQuery[]
+
+  @@index([workspaceId])
+  @@map("topics")
+}
+
+model EngineConfig {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  engine      AiEngine
+  enabled     Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([workspaceId, engine])
+  @@map("engine_configs")
+}
+
+model AeoQuery {
+  id          String    @id @default(uuid())
+  workspaceId String    @map("workspace_id")
+  topicId     String?   @map("topic_id")
+  query       String
+  status      String
+  createdAt   DateTime  @default(now()) @map("created_at")
+  topic       Topic?    @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  runs        QueryRun[]
+
+  @@index([workspaceId])
+  @@map("aeo_queries")
+}
+
+model PromptTemplate {
+  id          String   @id @default(uuid())
+  workspaceId String?  @map("workspace_id")
+  name        String
+  template    String   @db.Text
+  category    String   @default("general")
+  isSystem    Boolean  @default(false) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@index([workspaceId])
+  @@map("prompt_templates")
+}
+
+model QueryRun {
+  id           String    @id @default(uuid())
+  workspaceId  String    @map("workspace_id")
+  queryId      String    @map("query_id")
+  engine       AiEngine
+  responseText String    @map("response_text")
+  status       JobStatus @default(PENDING)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  query        AeoQuery  @relation(fields: [queryId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@map("query_runs")
+}
+
+model QuerySchedule {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  cronExpr    String   @default("0 6 * * *") @map("cron_expr")
+  enabled     Boolean  @default(true)
+  lastRunAt   DateTime? @map("last_run_at")
+  nextRunAt   DateTime? @map("next_run_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([workspaceId])
+  @@map("query_schedules")
+}
+
+// ── Prompt Research Module ─────────────────────────────────────────
+
+model ResearchTopic {
+  id          String           @id @default(uuid())
+  workspaceId String           @map("workspace_id")
+  name        String
+  color       String           @default("#6366f1")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  prompts     ResearchPrompt[]
+
+  @@index([workspaceId])
+  @@map("research_topics")
+}
+
+model ResearchPrompt {
+  id                 String             @id @default(uuid())
+  workspaceId        String             @map("workspace_id")
+  promptText         String             @map("prompt_text") @db.Text
+  topicId            String?            @map("topic_id")
+  promptType         ResearchPromptType @default(INFORMATIONAL) @map("prompt_type")
+  region             String             @default("Global")
+  createdBy          String?            @map("created_by")
+  metricsComputed    Boolean            @default(false) @map("metrics_computed")
+  metricsComputedAt  DateTime?          @map("metrics_computed_at")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  topic   ResearchTopic?        @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  tags    ResearchPromptTag[]
+  metrics ResearchPromptMetric[]
+
+  @@index([workspaceId])
+  @@map("research_prompts")
+}
+
+model ResearchPromptTag {
+  id       String         @id @default(uuid())
+  promptId String         @map("prompt_id")
+  tag      String
+
+  prompt   ResearchPrompt @relation(fields: [promptId], references: [id], onDelete: Cascade)
+
+  @@index([promptId])
+  @@map("research_prompt_tags")
+}
+
+model ResearchPromptMetric {
+  id           String         @id @default(uuid())
+  promptId     String         @map("prompt_id")
+  date         DateTime       @default(now())
+  promptVolume Int            @default(0) @map("prompt_volume")
+  mentionRate  Float          @default(0) @map("mention_rate")
+  citationRate Float          @default(0) @map("citation_rate")
+  aiSampleSize Int            @default(20) @map("ai_sample_size")
+  createdAt    DateTime       @default(now()) @map("created_at")
+
+  prompt       ResearchPrompt @relation(fields: [promptId], references: [id], onDelete: Cascade)
+
+  @@index([promptId])
+  @@map("research_prompt_metrics")
+}
+
+model AiResponse {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  queryRunId  String   @map("query_run_id")
+  engine      AiEngine
+  responseText String  @map("response_text")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId])
+  @@map("ai_responses")
+}
+
+model CitationEntry {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  queryRunId  String   @map("query_run_id")
+  citedUrl    String   @map("cited_url")
+  citedDomain String   @map("cited_domain")
+  citedBrand  String?  @map("cited_brand")
+  confidence  Float
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId, createdAt])
+  @@index([queryRunId, citedUrl])
+  @@map("citation_entries")
+}
+
+model VisibilityScore {
+  id           String   @id @default(uuid())
+  workspaceId  String   @map("workspace_id")
+  score        Int
+  shareOfVoice Float    @map("share_of_voice")
+  citationRate Float    @map("citation_rate")
+  periodStart  DateTime @map("period_start")
+  periodEnd    DateTime @map("period_end")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId, createdAt])
+  @@map("visibility_scores")
+}
+
+model Opportunity {
+  id            String   @id @default(uuid())
+  workspaceId   String   @map("workspace_id")
+  queryId       String   @map("query_id")
+  competitor    String
+  gapType       String   @map("gap_type")
+  priorityScore Float    @map("priority_score")
+  recommendation String
+  status        String   @default("OPEN")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId, createdAt])
+  @@map("opportunities")
+}
+
+model GeneratedContent {
+  id          String   @id @default(uuid())
+  workspaceId String   @map("workspace_id")
+  queryId     String   @map("query_id")
+  content     String   @db.Text
+  status      String
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@index([workspaceId])
+  @@map("generated_content")
+}
+
+model WorkflowTemplate {
+  id          String         @id @default(uuid())
+  workspaceId String         @map("workspace_id")
+  name        String
+  description String?
+  inputType   String         @default("text") @map("input_type")
+  definition  Json
+  createdAt   DateTime       @default(now()) @map("created_at")
+  workspace   Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  steps       WorkflowStep[]
+  runs        WorkflowRun[]
+
+  @@index([workspaceId])
+  @@map("workflow_templates")
+}
+
+model WorkflowStep {
+  id                 String           @id @default(uuid())
+  workflowTemplateId String           @map("workflow_template_id")
+  stepOrder          Int              @map("step_order")
+  stepType           String           @map("step_type")
+  label              String           @default("")
+  configJson         Json             @default("{}") @map("config_json")
+  createdAt          DateTime         @default(now()) @map("created_at")
+
+  workflowTemplate WorkflowTemplate @relation(fields: [workflowTemplateId], references: [id], onDelete: Cascade)
+
+  @@index([workflowTemplateId])
+  @@map("workflow_steps")
+}
+
+model WorkflowRun {
+  id                 String           @id @default(uuid())
+  workspaceId        String           @map("workspace_id")
+  workflowTemplateId String           @map("workflow_template_id")
+  status             JobStatus        @default(PENDING)
+  retryCount         Int              @default(0) @map("retry_count")
+  inputData          Json?            @map("input_data")
+  outputData         Json?            @map("output_data")
+  createdAt          DateTime         @default(now()) @map("created_at")
+
+  workflowTemplate WorkflowTemplate @relation(fields: [workflowTemplateId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@map("workflow_runs")
+}
+
+// ── Grids Module ───────────────────────────────────────────────────
+
+enum GridColumnType {
+  text
+  number
+  url
+  ai_prompt
+  workflow
+  json
+
+  @@map("GridColumnType")
+}
+
+enum GridCellStatus {
+  idle
+  running
+  completed
+  error
+
+  @@map("GridCellStatus")
+}
+
+model Grid {
+  id          String       @id @default(uuid())
+  workspaceId String       @map("workspace_id")
+  name        String
+  description String?
+  createdBy   String?      @map("created_by")
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  columns     GridColumn[]
+  rows        GridRow[]
+
+  @@index([workspaceId])
+  @@map("grids")
+}
+
+model GridColumn {
+  id          String         @id @default(uuid())
+  gridId      String         @map("grid_id")
+  columnName  String         @map("column_name")
+  columnType  GridColumnType @default(text) @map("column_type")
+  workflowId  String?        @map("workflow_id")
+  position    Int            @default(0)
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  grid  Grid       @relation(fields: [gridId], references: [id], onDelete: Cascade)
+  cells GridCell[]
+
+  @@index([gridId])
+  @@map("grid_columns")
+}
+
+model GridRow {
+  id        String     @id @default(uuid())
+  gridId    String     @map("grid_id")
+  rowIndex  Int        @default(0) @map("row_index")
+  createdAt DateTime   @default(now()) @map("created_at")
+
+  grid  Grid       @relation(fields: [gridId], references: [id], onDelete: Cascade)
+  cells GridCell[]
+
+  @@index([gridId])
+  @@map("grid_rows")
+}
+
+model GridCell {
+  id        String         @id @default(uuid())
+  rowId     String         @map("row_id")
+  columnId  String         @map("column_id")
+  value     String?
+  status    GridCellStatus @default(idle)
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
+
+  row    GridRow    @relation(fields: [rowId], references: [id], onDelete: Cascade)
+  column GridColumn @relation(fields: [columnId], references: [id], onDelete: Cascade)
+
+  @@unique([rowId, columnId])
+  @@index([rowId])
+  @@index([columnId])
+  @@map("grid_cells")
+}
+
+// ── Integrations Module ────────────────────────────────────────────
+
+enum IntegrationType {
+  GOOGLE_SEARCH_CONSOLE
+  GOOGLE_ANALYTICS
+  WORDPRESS
+  SLACK
+}
+
+enum IntegrationStatus {
+  CONNECTED
+  DISCONNECTED
+  ERROR
+}
+
+model Integration {
+  id          String            @id @default(uuid())
+  workspaceId String            @map("workspace_id")
+  type        IntegrationType
+  status      IntegrationStatus @default(DISCONNECTED)
+  lastSyncAt  DateTime?         @map("last_sync_at")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account     IntegrationAccount?
+  properties  IntegrationProperty[]
+  syncLogs    SyncLog[]
+  gscQueries        GscQuery[]
+  gscPages          GscPage[]
+  gscQueryDates     GscQueryDate[]
+  gscQueryDevices   GscQueryDevice[]
+  gscQueryCountries GscQueryCountry[]
+  wpPosts           WpPost[]
+
+  @@unique([workspaceId, type])
+  @@map("integrations")
+}
+
+model IntegrationAccount {
+  id            String      @id @default(uuid())
+  integrationId String      @unique @map("integration_id")
+  accountEmail  String?     @map("account_email")
+  accessToken   String?     @map("access_token")
+  refreshToken  String?     @map("refresh_token")
+  tokenExpiry   DateTime?   @map("token_expiry")
+  metadata      Json?
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@map("integration_accounts")
+}
+
+model IntegrationProperty {
+  id            String      @id @default(uuid())
+  integrationId String      @map("integration_id")
+  propertyName  String      @map("property_name")
+  propertyUrl   String      @map("property_url")
+  selected      Boolean     @default(false)
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  integration   Integration  @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@map("integration_properties")
+}
+
+// ── GSC analytics tables ──────────────────────────────────────────
+
+model GscQuery {
+  id            String      @id @default(uuid())
+  integrationId String      @map("integration_id")
+  workspaceId   String      @map("workspace_id")
+  query         String
+  page          String
+  clicks        Int         @default(0)
+  impressions   Int         @default(0)
+  ctr           Float       @default(0)
+  position      Float       @default(0)
+  syncedAt      DateTime    @default(now()) @map("synced_at")
+
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@unique([integrationId, query, page])
+  @@index([workspaceId])
+  @@map("gsc_queries")
+}
+
+model GscPage {
+  id            String      @id @default(uuid())
+  integrationId String      @map("integration_id")
+  workspaceId   String      @map("workspace_id")
+  page          String
+  clicks        Int         @default(0)
+  impressions   Int         @default(0)
+  ctr           Float       @default(0)
+  position      Float       @default(0)
+  syncedAt      DateTime    @default(now()) @map("synced_at")
+
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@unique([integrationId, page])
+  @@index([workspaceId])
+  @@map("gsc_pages")
+}
+
+model GscQueryDate {
+  id            String      @id @default(uuid())
+  integrationId String      @map("integration_id")
+  workspaceId   String      @map("workspace_id")
+  query         String
+  date          DateTime
+  clicks        Int         @default(0)
+  impressions   Int         @default(0)
+  ctr           Float       @default(0)
+  position      Float       @default(0)
+  syncedAt      DateTime    @default(now()) @map("synced_at")
+
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@unique([integrationId, query, date])
+  @@index([workspaceId])
+  @@index([integrationId, date])
+  @@map("gsc_query_dates")
+}
+
+model GscQueryDevice {
+  id            String      @id @default(uuid())
+  integrationId String      @map("integration_id")
+  workspaceId   String      @map("workspace_id")
+  query         String
+  device        String
+  clicks        Int         @default(0)
+  impressions   Int         @default(0)
+  ctr           Float       @default(0)
+  position      Float       @default(0)
+  syncedAt      DateTime    @default(now()) @map("synced_at")
+
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@unique([integrationId, query, device])
+  @@index([workspaceId])
+  @@map("gsc_query_devices")
+}
+
+model GscQueryCountry {
+  id            String      @id @default(uuid())
+  integrationId String      @map("integration_id")
+  workspaceId   String      @map("workspace_id")
+  query         String
+  country       String
+  clicks        Int         @default(0)
+  impressions   Int         @default(0)
+  ctr           Float       @default(0)
+  position      Float       @default(0)
+  syncedAt      DateTime    @default(now()) @map("synced_at")
+
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@unique([integrationId, query, country])
+  @@index([workspaceId])
+  @@map("gsc_query_countries")
+}
+
+model SyncLog {
+  id            String      @id @default(uuid())
+  integrationId String      @map("integration_id")
+  syncType      String      @map("sync_type")
+  status        String
+  recordsSynced Int?        @map("records_synced")
+  error         String?
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@map("sync_logs")
+}
+
+// ── Brand Kit Module ───────────────────────────────────────────────
+
+model BrandProfile {
+  id          String    @id @default(uuid())
+  workspaceId String    @unique @map("workspace_id")
+  brandName   String    @map("brand_name")
+  website     String?
+  industry    String?
+  description String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("brand_profile")
+}
+
+model BrandVoice {
+  id               String    @id @default(uuid())
+  workspaceId      String    @unique @map("workspace_id")
+  tone             String?
+  writingStyle     String?   @map("writing_style")
+  readingLevel     String?   @map("reading_level")
+  preferredPhrases String[]  @map("preferred_phrases")
+  avoidPhrases     String[]  @map("avoid_phrases")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("brand_voice")
+}
+
+model BrandProduct {
+  id          String    @id @default(uuid())
+  workspaceId String    @map("workspace_id")
+  productName String    @map("product_name")
+  description String?
+  productUrl  String?   @map("product_url")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("brand_products")
+}
+
+model BrandAudience {
+  id                String    @id @default(uuid())
+  workspaceId       String    @unique @map("workspace_id")
+  primaryAudience   String?   @map("primary_audience")
+  secondaryAudience String?   @map("secondary_audience")
+  geography         String?
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("brand_audience")
+}
+
+model BrandCompetitor {
+  id             String    @id @default(uuid())
+  workspaceId    String    @map("workspace_id")
+  competitorName String    @map("competitor_name")
+  website        String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@map("brand_competitors")
+}
+
+// ── WordPress posts ──────────────────────────────────────────────
+
+model WpPost {
+  id            String      @id @default(uuid())
+  integrationId String      @map("integration_id")
+  workspaceId   String      @map("workspace_id")
+  wpPostId      Int         @map("wp_post_id")
+  title         String
+  slug          String
+  url           String
+  status        String
+  publishedAt   DateTime?   @map("published_at")
+  modifiedAt    DateTime?   @map("modified_at")
+  syncedAt      DateTime    @default(now()) @map("synced_at")
+
+  integration   Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@unique([integrationId, wpPostId])
+  @@index([workspaceId])
+  @@map("wp_posts")
+}
+
+// ── Pages Module ──────────────────────────────────────────────────
+
+enum OpportunityScore {
+  high
+  medium
+  low
+}
+
+model Page {
+  id               String           @id @default(uuid())
+  workspaceId      String           @map("workspace_id")
+  pageUrl          String           @map("page_url")
+  totalClicks      Int              @default(0) @map("total_clicks")
+  totalImpressions Int              @default(0) @map("total_impressions")
+  avgCtr           Float            @default(0) @map("avg_ctr")
+  avgPosition      Float            @default(0) @map("avg_position")
+  opportunityScore OpportunityScore @default(low) @map("opportunity_score")
+  lastSeenDate     DateTime?        @map("last_seen_date")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  @@unique([workspaceId, pageUrl])
+  @@index([workspaceId])
+  @@index([workspaceId, opportunityScore])
+  @@map("pages")
+}

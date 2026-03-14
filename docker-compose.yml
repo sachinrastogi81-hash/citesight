@@ -1,0 +1,91 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: citesight-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: citesight
+    ports:
+      - "5432:5432"
+    volumes:
+      - citesight_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d citesight"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7
+    container_name: citesight-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: citesight-api
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      LOG_LEVEL: info
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/citesight
+      REDIS_URL: redis://redis:6379
+      JWT_ACCESS_SECRET: dev-access-secret
+      JWT_REFRESH_SECRET: dev-refresh-secret
+      CORS_ORIGIN: http://localhost:3001
+      AZURE_OPENAI_ENDPOINT: ${AZURE_OPENAI_ENDPOINT:-https://your-resource.openai.azure.com/}
+      AZURE_OPENAI_DEPLOYMENT: ${AZURE_OPENAI_DEPLOYMENT:-gpt-4.1-mini}
+      AZURE_OPENAI_API_KEY: ${AZURE_OPENAI_API_KEY:-your-azure-openai-key-here}
+    ports:
+      - "4001:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_API_BASE_URL: http://localhost:4001/api
+    container_name: citesight-web
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+    ports:
+      - "3001:3000"
+    depends_on:
+      api:
+        condition: service_started
+
+  worker:
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
+    container_name: citesight-worker
+    environment:
+      PORT: 8081
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/citesight
+      REDIS_URL: redis://redis:6379
+      WORKER_CONCURRENCY: 2
+      QUEUE_POLL_INTERVAL_MS: 1500
+    ports:
+      - "8081:8081"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  citesight_postgres_data:
